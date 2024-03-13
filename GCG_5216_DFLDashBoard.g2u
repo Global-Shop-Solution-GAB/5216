@@ -1,0 +1,316 @@
+Program.Sub.ScreenSU.Start
+Gui.f_Inventory_DashBoard..Create
+Gui.f_Inventory_DashBoard..Size(15360,10695)
+Gui.f_Inventory_DashBoard..MinX(0)
+Gui.f_Inventory_DashBoard..MinY(0)
+Gui.f_Inventory_DashBoard..Position(0,0)
+Gui.f_Inventory_DashBoard..BackColor(-2147483633)
+Gui.f_Inventory_DashBoard..MousePointer(0)
+Gui.f_Inventory_DashBoard..Event(GotFocus,f_Inventory_DashBoard_GotFocus)
+Gui.f_Inventory_DashBoard..Event(MouseDown,f_Inventory_DashBoard_MouseDown)
+Gui.f_Inventory_DashBoard..Event(MouseMove,f_Inventory_DashBoard_MouseMove)
+Gui.f_Inventory_DashBoard..Event(MouseUp,f_Inventory_DashBoard_MouseUp)
+Gui.f_Inventory_DashBoard..Event(Resize,f_Inventory_DashBoard_Resize)
+Gui.f_Inventory_DashBoard..Event(UnLoad,f_Inventory_DashBoard_UnLoad)
+Gui.f_Inventory_DashBoard..Caption("Inventory DashBoard")
+Gui.f_Inventory_DashBoard.gsGCInv.Create(GsGridControl)
+Gui.f_Inventory_DashBoard.gsGCInv.Size(14700,7365)
+Gui.f_Inventory_DashBoard.gsGCInv.Position(210,465)
+Gui.f_Inventory_DashBoard.gsGCInv.Anchor(15)
+Gui.f_Inventory_DashBoard.cmdExport.Create(Button)
+Gui.f_Inventory_DashBoard.cmdExport.Size(855,375)
+Gui.f_Inventory_DashBoard.cmdExport.Position(4005,7980)
+Gui.f_Inventory_DashBoard.cmdExport.Caption("Export")
+Gui.f_Inventory_DashBoard.cmdExport.Event(Click,cmdExport_Click)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+v.Global.bVCost.Declare(Boolean)
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+'Author: GaryB
+'Date:   10/10/18
+'Customer: Decker Manufacturing Corp.
+'Add custom menu item to view inventory in a dashboard style, if user is not in VCOST group - do not show the "cost" column
+'custom menu item - Inventory > View > Inventory Dashboard
+'GCG_5216_DFLDashBoard.g2u 
+
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+
+v.Local.sSQL.Declare(String)
+v.Local.iCount.Declare(Long)
+v.Local.iHours.Declare(Long)
+v.Local.fSumHours.Declare(Float)
+V.Local.sTemp.Declare(String)
+'open DB connection
+f.ODBC.Connection!Con.OpenCompanyConnection
+'custom menu item - Inventory > View > Inventory Dashboard  
+'f.Intrinsic.Debug.InvokeDebugger
+'Function.Intrinsic.Debug.Stop
+
+'customer does not want the "on order wo" amount from supply and demand screen, they want to use what has already been issued
+'so I created a datadictionary to get the part and quantity needed and added them to the grid
+'they wanted to pull the hours_actual instead of checking the qty_completed and closed_flag because they do not have their users closing the job sequences correctly
+f.Data.DataTable.CreateFromSQL("dtOnhand1","Con","SELECT DISTINCT(JOB) AS JOB, SUFFIX, ROUTER,HOURS_ACTUAL FROM V_JOB_OPERATIONS WHERE LMO = 'M' AND SEQ < '900000' ",True)
+f.Data.DataTable.CreateFromSQL("dtOnhand2","Con","SELECT JOB, SUFFIX, PART, ROUTER FROM V_JOB_HEADER WHERE DATE_CLOSED = '1900-01-01'",True)
+f.Data.Linq.Join("Leftjoin","datatable","dtOnhand1*!*I","datatable","dtOnhand2*!*O","I.JOB=O.JOB AND I.SUFFIX=O.SUFFIX","O.PART*!*I.HOURS_ACTUAL","","","","dtOnhandQty",True)
+'f.Data.DataTable.CreateFromSQL("dtAll","Con","select distinct v_job_operations.job,v_job_header.suffix,v_job_header.part,v_job_header.router,v_job_operations.hours_actual from v_job_header,v_job_operations where v_job_header.date_closed = '1900-01-01' and v_job_operations.lmo = 'M' and v_job_operations.job = v_job_header.job and v_job_operations.suffix = v_job_header.suffix and v_job_operations.seq < '990000'",True)
+'f.Data.DataTable.CreateFromSQL("dtParts","Con"," SELECT DISTINCT(Router) AS Part, SUM(HOURS_ACTUAL) as HOURS FROM V_JOB_OPERATIONS WHERE LMO = 'M' AND SEQ < '900000' group by PART",True)
+'data table has multiple lines in it, need to go through the table and sum up hours_actual for each part
+f.Data.DataView.Create("dtOnHandQty","dvOnhandQty")
+f.Data.DataView.ToDataTableDistinct("dtOnhandQty","dvOnhandQty","dtUniquePart","PART")
+   f.Data.DataTable.AddColumn("dtUniquePart","Hours_Actual","Long")
+   f.Intrinsic.Control.For(v.Local.iCount,0,v.DataTable.dtUniquePart.rowcount--,1)
+   	F.Intrinsic.String.Build("[PART]='{0}'", v.DataTable.dtUniquePart(v.Local.iCount).Part!fieldValTrim, V.Local.sTemp)
+     f.Data.DataTable.Compute("dtOnhandQty","SUM(HOURS_ACTUAL)",V.Local.sTemp,V.Local.fSumHours)
+  '   f.Intrinsic.UI.Msgbox(v.Local.fSumHours)
+     f.Data.DataTable.SetValue("dtUniquePart",v.Local.iCount,"Hours_Actual",v.Local.fSumHours) 
+   f.Intrinsic.Control.Next(v.Local.iCount)
+
+f.Data.Dictionary.CreateFromDataTable("ddOnhandQty","dtUniquePart","PART","HOURS_ACTUAL")
+F.Data.Dictionary.SetDefaultReturn("ddOnhandQty",0)
+
+'select info from v_inventory_mstr using sql and a datatable and join it to v_inventory_mst3 to pick up other fields
+'f.Data.DataTable.CreateFromSQL("dtInvDash1","Con","Select PART, PRODUCT_LINE, CODE_SORT, AMT_COST, QTY_ONHAND, QTY_ONORDER_PO as ON_ORDER_PO, QTY_REQUIRED, (QTY_ONHAND + QTY_ONORDER_PO - QTY_REQUIRED) as Net1, QTY_REORDER from V_INVENTORY_MSTR",TRUE)
+f.Data.DataTable.CreateFromSQL("dtInvDash1","Con","Select PART, PRODUCT_LINE, CODE_SORT, QTY_ONHAND, QTY_ONORDER_PO as ON_ORDER_PO, QTY_REQUIRED, (QTY_ONHAND + QTY_ONORDER_PO - QTY_REQUIRED) as Net1, QTY_REORDER from V_INVENTORY_MSTR",TRUE)
+
+'f.Data.DataTable.CreateFromSQL("dtInvDash2","Con","Select PART, (PKGD_WEIGHT / PCS_PER_CNTNR) as WEIGHT, PKGD_WEIGHT as PACKWEIGHT, PCS_PER_CNTNR as PIECESPERCONT, CNTNRS_PER_PALLET as CARTONPERPALLET from V_INVENTORY_MST3",TRUE)
+'added this case statement so if the quantity is zero we use zero and we do not error out from divide by zero error.
+f.Data.DataTable.CreateFromSQL("dtInvDash2","Con","Select PART, CASE WHEN PCS_Per_Cntnr = 0 Then 0 Else (PKGD_WEIGHT / PCS_PER_CNTNR) End as WEIGHT, PKGD_WEIGHT as PACKWEIGHT, PCS_PER_CNTNR as PIECESPERCONT, CNTNRS_PER_PALLET as CARTONPERPALLET from V_INVENTORY_MST3",TRUE)
+'join tables using linq
+'f.Data.Linq.Join("Leftjoin","datatable","dtInvDash1*!*I","datatable","dtInvDash2*!*O","I.PART=O.PART","I.PART*!*I.PRODUCT_LINE*!*I.CODE_SORT*!*I.AMT_COST*!*I.QTY_ONHAND*!*I.ON_ORDER_PO*!*I.QTY_REQUIRED*!*I.NET1*!*I.QTY_REORDER*!*O.WEIGHT*!*O.PACKWEIGHT*!*O.PIECESPERCONT*!*O.CARTONPERPALLET","","","","dtInvDash",True)
+f.Data.Linq.Join("Leftjoin","datatable","dtInvDash1*!*I","datatable","dtInvDash2*!*O","I.PART=O.PART","I.PART*!*I.PRODUCT_LINE*!*I.CODE_SORT*!*I.QTY_ONHAND*!*I.ON_ORDER_PO*!*I.QTY_REQUIRED*!*I.NET1*!*I.QTY_REORDER*!*O.WEIGHT*!*O.PACKWEIGHT*!*O.PIECESPERCONT*!*O.CARTONPERPALLET","","","","dtInvDash",True)
+
+'pull cost from inventory_cost table not the inventory_master
+f.Data.Dictionary.CreateFromSQL("ddAmountCost","Con","Select PART,COST as AMT_COST FROM V_INVENTORY_COST")
+f.Data.Dictionary.SetDefaultReturn("ddAmountCost",0.0)
+f.Data.DataTable.AddColumn("dtInvDash","AMT_COST","Float")
+F.Data.DataTable.FillFromDictionary("dtInvDash","ddAmountCost","PART","AMT_COST")
+f.Data.Dictionary.Close("ddAmountCost")
+'this gives me the quantity the customer wants for the on order wo
+f.Data.DataTable.AddColumn("dtInvDash","qty_completed","Long")
+f.Data.DataTable.FillFromDictionary("dtInvDash","ddOnhandQty","PART","QTY_COMPLETED")
+'this is the On Order amount total
+f.Data.DataTable.AddExpressionColumn("dtInvDash","ON_ORDER","Long","ON_ORDER_PO + QTY_COMPLETED")
+'this is the new Net amount
+f.Data.DataTable.AddExpressionColumn("dtInvDash","NET","LONG","QTY_COMPLETED + Net1")
+f.Data.Dictionary.Close("ddOnhandQty")
+f.ODBC.Connection!Con.Close
+'f.Intrinsic.Debug.Stop
+
+'remove cost column based on security
+F.Global.Security.IsInGroup(V.Caller.User,"VCOST",V.Caller.CompanyCode,v.Global.bVCost)
+F.Intrinsic.Control.If(v.Global.bVCost,<>,True)
+   f.Data.DataTable.RemoveColumn("dtInvDash","AMT_COST")
+F.Intrinsic.Control.EndIf
+
+'create a view of the rows
+f.Data.DataView.Create("dtInvDash","InvDashView",22)
+
+f.Intrinsic.Control.CallSub(CreateGrid)
+
+'set this to the mainview
+gui.f_Inventory_DashBoard.gsGCInv.MainView("gvInvDashHeaderView") 
+'show the screen
+gui.f_Inventory_DashBoard..Show
+'get the previous grid control settings
+f.Intrinsic.Control.CallSub(Deserialize)
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    f.Intrinsic.Control.CallSub(f_Inventory_DashBoard_Unload)
+F.Intrinsic.Control.EndTry
+
+
+Program.Sub.Main.End
+
+Program.Sub.f_Inventory_DashBoard_UnLoad.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+
+'save the settings from the gridcontrol to registry
+f.Intrinsic.Control.CallSub(Serialize)
+f.Intrinsic.Control.End
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    f.Intrinsic.Control.CallSub(f_Inventory_DashBoard_Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.f_Inventory_DashBoard_UnLoad.End
+
+Program.Sub.f_Inventory_DashBoard_Resize.Start
+Program.Sub.f_Inventory_DashBoard_Resize.End
+
+Program.Sub.f_Inventory_DashBoard_MouseDown.Start
+Program.Sub.f_Inventory_DashBoard_MouseDown.End
+
+Program.Sub.f_Inventory_DashBoard_MouseMove.Start
+Program.Sub.f_Inventory_DashBoard_MouseMove.End
+
+Program.Sub.f_Inventory_DashBoard_MouseUp.Start
+Program.Sub.f_Inventory_DashBoard_MouseUp.End
+
+Program.Sub.f_Inventory_DashBoard_GotFocus.Start
+Program.Sub.f_Inventory_DashBoard_GotFocus.End
+
+Program.Sub.CreateGrid.Start
+F.Intrinsic.Control.Try
+V.Local.sError.Declare(String, "")
+'create gridview
+gui.f_Inventory_DashBoard.gsGCInv.AddGridviewFromDataview("gvInvDashHeaderView","dtInvDash","InvDashView")
+'hide some columns
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","ON_ORDER_PO","Visible",False)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","NET1","Visible",False)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","qty_completed","Visible",False)
+'change column names
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PART","Caption","Part Number")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PRODUCT_LINE","Caption","Product Line")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","CODE_SORT","Caption","Sort Code")
+f.Intrinsic.Control.If(v.Global.bVCost)
+   gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","AMT_COST","Caption","Cost")
+f.Intrinsic.Control.EndIf
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_ONHAND","Caption","On Hand")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","ON_ORDER","Caption","On Order")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_REQUIRED","Caption","Required")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","NET","Caption","Net")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_REORDER","Caption","Reorder Point")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","WEIGHT","Caption","Weight")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PACKWEIGHT","Caption","Packaged Weight")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PIECESPERCONT","Caption","Pieces per Container")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","CARTONPERPALLET","Caption","Cartons per Pallet")
+'bold column headings
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PART","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PRODUCT_LINE","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","CODE_SORT","HeaderFontBold",True)
+f.Intrinsic.Control.If(v.Global.bVCost)
+   gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","AMT_COST","HeaderFontBold",True)
+f.Intrinsic.Control.EndIf   
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_ONHAND","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","ON_ORDER","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_REQUIRED","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","NET","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_REORDER","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","WEIGHT","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PACKWEIGHT","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PIECESPERCONT","HeaderFontBold",True)
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","CARTONPERPALLET","HeaderFontBold",True)
+'set column formatting
+f.Intrinsic.Control.If(v.Global.bVCost)
+   gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","AMT_COST","DisplayCustomNumeric","#########.00000")
+f.Intrinsic.Control.EndIf
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_ONHAND","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","ON_ORDER","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_REQUIRED","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","NET","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","QTY_REORDER","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","WEIGHT","DisplayCustomNumeric","#########.00000")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PACKWEIGHT","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","PIECESPERCONT","DisplayCustomNumeric","#########.00")
+gui.f_Inventory_DashBoard.gsGCInv.SetColumnProperty("gvInvDashHeaderView","CARTONPERPALLET","DisplayCustomNumeric","#########.00")
+' add totals to columns in the grid                         gridview, colume name, column tag, function, text before, text after, formatting 
+'N2  number of decimals after long value, C2 number of decimals with currency displayed 
+gui.f_Inventory_DashBoard.gsGCInv.AddSummaryItem("gvInvDashHeaderView","QTY_ONHAND","ONHAND","SUM","Total: ","","N2")
+gui.f_Inventory_DashBoard.gsGCInv.AddSummaryItem("gvInvDashHeaderView","ON_ORDER","ONORDER","SUM","Total: ","","N2")
+gui.f_Inventory_DashBoard.gsGCInv.AddSummaryItem("gvInvDashHeaderView","QTY_REQUIRED","REQUIRED","SUM","Total: ","","N2")
+gui.f_Inventory_DashBoard.gsGCInv.AddSummaryItem("gvInvDashHeaderView","NET","NET","SUM","Total: ","","N2")
+f.Intrinsic.Control.If(v.Global.bVCost)
+   gui.f_Inventory_DashBoard.gsGCInv.AddSummaryItem("gvInvDashHeaderView","AMT_COST","COSTTAG","AVERAGE","Total: ","","C5")
+f.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    f.Intrinsic.Control.CallSub(f_Inventory_DashBoard_Unload)
+F.Intrinsic.Control.EndTry
+Program.Sub.CreateGrid.End
+
+Program.Sub.Serialize.Start
+F.Intrinsic.Control.Try
+	V.Local.sError.Declare
+	
+	V.Local.sSerialize.Declare	
+'save grid settings to registry	
+	gui.f_Inventory_DashBoard.gsGCInv.Serialize("gvInvDashHeaderView",v.Local.sSerialize)
+	F.Global.Registry.AddValue(V.Caller.User,V.Caller.CompanyCode,"gvInvDashHeaderView",5216,1000,False,"Serialize",False,0,-999.0,1/1/1980,12:00:00 AM,V.Local.sSerialize)
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Serialize.End
+
+Program.Sub.Deserialize.Start
+F.Intrinsic.Control.Try
+	V.Local.sError.Declare
+	
+	V.Local.sSerialize.Declare
+	
+'Delete old registry records
+	F.Global.Registry.ReadValue(V.Caller.User,V.Caller.CompanyCode,"gvInvDashHeaderView",5216,0,5,"",V.Local.sSerialize)
+	F.Intrinsic.Control.If(V.Local.sSerialize,<>,"")
+		F.ODBC.Connection!common.OpenConnection(V.Ambient.Ccon,V.Ambient.Cuser,V.Ambient.Cpass)
+		F.ODBC.Connection!common.Execute("Delete From Gs_Registry Where Reg_ID = 5216 And Seq < 1000;")
+		F.ODBC.Connection!common.Close
+	F.Intrinsic.Control.EndIf
+'read grid settings from registry
+	F.Global.Registry.ReadValue(V.Caller.User,V.Caller.CompanyCode,"gvInvDashHeaderView",5216,1000,6,"",V.Local.sSerialize)
+	F.Intrinsic.Control.If(V.Local.sSerialize,<>,"")
+		gui.f_Inventory_DashBoard.gsGCInv.Deserialize(V.Local.sSerialize)
+	F.Intrinsic.Control.EndIf
+	
+F.Intrinsic.Control.Catch
+	F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+	F.Intrinsic.UI.Msgbox(V.Local.sError)
+	F.Intrinsic.Control.End
+F.Intrinsic.Control.EndTry
+
+Program.Sub.Deserialize.End
+
+Program.Sub.cmdExport_Click.Start
+'Export Grid View as it appears
+V.Local..BulkDeclareString(sError,sFileExport,sMsg,sDate,sTime)
+V.Local..BulkDeclareBoolean(bExcel,bFileLocked)
+V.Local.sForm.Declare(String, "F_Inventory_Dashboard")
+V.Local.sControl.Declare(String, "gsGCInv")
+F.Intrinsic.Control.Try
+
+F.Automation.MSExcel.CheckPresence(V.Local.bExcel)
+F.Intrinsic.String.DateString(V.Ambient.Date,V.Local.sDate)
+F.Intrinsic.String.TimeString(V.Ambient.Time,V.Local.sTime)
+F.Intrinsic.Control.If(V.Local.bExcel)
+    F.Intrinsic.String.Build("{0}\GCG_5216_{1}_Export_{2}_{3}.xlsx",V.Caller.LocalGSSTempDir,V.Local.sControl,V.Local.sDate,V.Local.sTime,V.Local.sFileExport)
+    F.Intrinsic.File.IsFileLocked(V.Local.sFileExport,V.Local.bFileLocked)
+    F.Intrinsic.Control.If(V.Local.bFileLocked)
+        F.Intrinsic.String.Build("File is already open. Please close and export again.{0}File : {1}",V.Ambient.NewLine,V.Local.sFileExport,V.Local.sMsg)
+        F.Intrinsic.UI.Msgbox(V.Local.sMsg,"File In Use")
+    F.Intrinsic.Control.Else
+        Gui.[V.Local.sForm].[V.Local.sControl].Export(V.Local.sFileExport,"xlsx")
+        F.Intrinsic.Task.ShellExec(0,"",V.Local.sFileExport,"","",1)
+    F.Intrinsic.Control.EndIf
+F.Intrinsic.Control.Else
+    F.Intrinsic.String.Build("{0}\GCG_5216_{1}_Export_{2}_{3}.csv",V.Caller.LocalGssTempDir,V.Local.sControl,V.Local.sDate,V.Local.sTime,V.Local.sFileExport)
+    F.Intrinsic.File.IsFileLocked(V.Local.sFileExport,V.Local.bFileLocked)
+    F.Intrinsic.Control.If(V.Local.bFileLocked)
+        F.Intrinsic.String.Build("File is already open. Please close and export again.{0}File: {1}",V.Ambient.NewLine,V.Local.sFileExport,V.Local.sMsg)
+        F.Intrinsic.UI.Msgbox(V.Local.sMsg,"File In Use")
+    F.Intrinsic.Control.Else
+        Gui.[V.Local.sForm].[V.Local.sControl].Export(V.Local.sFileExport,"csv")
+    F.Intrinsic.Control.EndIf
+    F.Intrinsic.Task.ShellExec(0,"",V.Local.sFileExport,"","",1)
+F.Intrinsic.Control.EndIf
+
+F.Intrinsic.Control.Catch
+    F.Intrinsic.String.Build("Project: {0}{1}{1}Subroutine: {2}{1}Error Occurred {3} with description {4}{1}{1}GAB Version: {5}",V.Ambient.ScriptPath,V.Ambient.Newline,V.Ambient.CurrentSubroutine,V.Ambient.ErrorNumber,V.Ambient.ErrorDescription,V.Ambient.GABVersion,V.Local.sError)
+    F.Intrinsic.UI.Msgbox(V.Local.sError)
+    F.Intrinsic.Control.CallSub(F_Main_UnLoad)
+F.Intrinsic.Control.EndTry
+
+Program.Sub.cmdExport_Click.End
+
+
